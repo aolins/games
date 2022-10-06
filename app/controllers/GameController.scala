@@ -1,7 +1,15 @@
 package controllers
 
-import java.util.UUID
+import io.circe._
+import io.circe.generic._
+import io.circe.generic.semiauto._
+import io.circe.parser._
+import io.circe.syntax._
 
+import io.circe.generic.extras.semiauto._
+import io.circe.generic.extras.Configuration
+
+import java.util.UUID
 import javax.inject._
 import play.api.mvc.{AbstractController, Action, AnyContent, ControllerComponents}
 
@@ -11,11 +19,20 @@ import play.api.mvc.{AbstractController, Action, AnyContent, ControllerComponent
 class GameController  @Inject()(cc: ControllerComponents) extends AbstractController(cc) {
 
 
+  implicit val customConfig: Configuration = Configuration.default.withKebabCaseMemberNames
+
+
+  implicit val stateEncoder: Encoder[State] = deriveConfiguredEncoder
+  implicit val stateDecoder: Decoder[State] = deriveConfiguredDecoder
+
+  implicit val gtEncoder: Encoder[GameTable] = deriveConfiguredEncoder
+  implicit val gtDecoder: Decoder[GameTable] = deriveConfiguredDecoder
+
   var games:List[GameTable] = List()
 
 
   def getGames = Action {
-    Ok(games.toString())
+    Ok(games.asJson.noSpaces)
   }
 
   private def create(s:String): Unit ={
@@ -26,20 +43,20 @@ class GameController  @Inject()(cc: ControllerComponents) extends AbstractContro
     Ok("")
   }
 
-  private def findGame(name:String) = games.find( p => p.name == name)
+  
 
   def getGame(name:String) = Action{
-    findGame(name) match {
-      case Some(g) => Ok(g.toString)
+    Logic.findGame(games,name) match {
+      case Some(g) => Ok(g.asJson.noSpaces)
       case _ => NotFound(s"No game with such name $name")
     }
 }
 
   def openGame(name:String) = Action{
-    findGame(name) match {
+    Logic.findGame(games,name) match {
       case Some(x) if x.state == Closed => {
         x.state = Open
-        Ok("opened")
+        Ok(x.asJson.noSpaces)
       }
       case Some(GameTable(_,_,Open)) =>  BadRequest(s"Game $name is Open; unable to open")
       case _ => NotFound(s"No game with such name $name")
@@ -48,7 +65,7 @@ class GameController  @Inject()(cc: ControllerComponents) extends AbstractContro
 
 
   def removeGame(name:String) = Action{
-    findGame(name) match {
+    Logic.findGame(games,name) match {
       case Some(x) if x.state == Closed => {
         games = games.filter( _ != x)
         Ok("removed")
@@ -60,20 +77,18 @@ class GameController  @Inject()(cc: ControllerComponents) extends AbstractContro
   }
 
   def closeGame(name:String) = Action{
-    findGame(name) match {
-      case Some(x) if x.state == Open => {
-        x.state = Closed
-        Ok("closed")
-      }
-      case Some(GameTable(_,_,Closed)) =>  BadRequest(s"Game $name is Closed; unable to close")
-      case _ => NotFound(s"No game with such name $name")
+    Logic.closeGame(games,name) match {
+      case Left(x)  => Ok(x.asJson.noSpaces)
+      case Right(AttempToCloseClosedGameTable) =>  BadRequest(s"Game $name is Closed; unable to close")
+      case Right(NotFound) => NotFound(s"No game with such name $name")
+      case _ => BadRequest("Bad logic error")
 
     }
   }
 
 }
 
-trait State
+sealed trait State
 object Open extends State
 object Closed extends State
 
